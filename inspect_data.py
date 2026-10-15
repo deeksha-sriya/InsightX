@@ -180,8 +180,8 @@ simulated_inventory = product_demand.loc[
     "simulated_inventory"
 ].iloc[0]
 
-def generate_insight(event, simulated_inventory, normal_days_of_stock=14):
 
+def generate_insight(event, simulated_inventory, normal_days_of_stock=14):
     current_purchase_rate = event["purchase"]
 
     days_of_stock = (
@@ -192,35 +192,143 @@ def generate_insight(event, simulated_inventory, normal_days_of_stock=14):
 
     stockout_risk = days_of_stock < 7
 
-    view_change_pct = (
-        (event["view"] - event["view_7day_avg"])
-        / event["view_7day_avg"]
-        * 100
-        if event["view_7day_avg"] > 0
-        else 0
-    )
+    # Calculate percentage changes from historical baselines
+    def calculate_change(current, baseline):
+        if pd.notna(baseline) and baseline > 0:
+            return ((current - baseline) / baseline) * 100
+        return 0
 
-    cart_change_pct = (
-        (event["cart"] - event["cart_7day_avg"])
-        / event["cart_7day_avg"]
-        * 100
-        if event["cart_7day_avg"] > 0
-        else 0
+    view_change_pct = calculate_change(
+        event["view"], event["view_7day_avg"]
     )
-
-    purchase_change_pct = (
-        (event["purchase"] - event["purchase_7day_avg"])
-        / event["purchase_7day_avg"]
-        * 100
-        if event["purchase_7day_avg"] > 0
-        else 0
+    cart_change_pct = calculate_change(
+        event["cart"], event["cart_7day_avg"]
     )
+    purchase_change_pct = calculate_change(
+        event["purchase"], event["purchase_7day_avg"]
+    )
+    
+    # Summarize observed evidence without assuming the cause
+    observed_signals = []
 
-    if stockout_risk:
-        recommendation = "Review inventory and consider replenishment."
+    if view_change_pct >= 50:
+        observed_signals.append(
+            f"Views increased {view_change_pct:.1f}% above baseline"
+        )
+
+    if cart_change_pct >= 30:
+        observed_signals.append(
+            f"Cart events increased {cart_change_pct:.1f}% above baseline"
+        )
+
+    if purchase_change_pct >= 50:
+        observed_signals.append(
+            f"Purchases increased {purchase_change_pct:.1f}% above baseline"
+        )
+
+    if observed_signals:
+        evidence_summary = "; ".join(observed_signals) + "."
     else:
-        recommendation = "Inventory coverage appears healthy."
+        evidence_summary = (
+            "The demand signals changed, but none crossed the "
+            "configured evidence thresholds."
+        )
 
+    signal_count = sum([
+        view_change_pct >= 50,
+        cart_change_pct >= 30,
+        purchase_change_pct >= 50,
+    ])
+    
+    if signal_count == 3:
+        signal_strength = "Strong"
+    elif signal_count == 2:
+        signal_strength = "Moderate"
+    else:
+        signal_strength = "Early signal"
+
+    # Classify the observed demand pattern
+    if (
+        view_change_pct >= 50
+        and cart_change_pct >= 30
+        and purchase_change_pct >= 50
+    ):
+        demand_pattern = "Full-funnel demand spike"
+        explanation = (
+            "Views, cart events, and purchases all increased substantially "
+            "compared with their historical baselines."
+        )
+
+    elif purchase_change_pct >= 50 and view_change_pct < 50:
+        demand_pattern = "Purchase-led spike"
+        explanation = (
+            "Purchases increased sharply without an equally large increase "
+            "in views. Investigate changes in buying behaviour or traffic quality."
+        )
+
+    elif view_change_pct >= 50 and cart_change_pct < 30:
+        demand_pattern = "Interest-led spike"
+        explanation = (
+            "Views increased substantially, but cart activity rose less. "
+            "Investigate whether the additional interest is translating into buying intent."
+        )
+
+    else:
+        demand_pattern = "Mixed demand spike"
+        explanation = (
+            "Demand signals changed by different amounts. Review the individual "
+            "metrics to understand where the strongest increase occurred."
+        )
+
+    # Generate an inventory recommendation
+    if stockout_risk:
+        recommendation = (
+            "Review inventory and consider replenishment. "
+            "Current simulated stock coverage is below 7 days."
+        )
+    else:
+        recommendation = "Inventory coverage appears healthy based on the simulated estimate."
+
+    strongest_signal = max(
+        [
+            ("Views", view_change_pct),
+            ("Cart events", cart_change_pct),
+            ("Purchases", purchase_change_pct),
+        ],
+        key=lambda signal: signal[1],
+    )
+
+    strongest_signal_name = strongest_signal[0]
+    strongest_signal_change_pct = round(strongest_signal[1], 1)
+
+    if (
+        cart_change_pct > purchase_change_pct
+        and cart_change_pct > view_change_pct
+    ):
+        signal_interpretation = (
+            "Cart activity is rising faster than views and purchases. "
+            "Investigate whether the increased cart activity is translating into purchases."
+        )
+
+    elif purchase_change_pct >= view_change_pct and purchase_change_pct >= cart_change_pct:
+        signal_interpretation = (
+            "Purchases show the largest percentage increase. "
+            "Review inventory availability and monitor whether this demand continues."
+        )
+
+    elif view_change_pct > cart_change_pct and view_change_pct > purchase_change_pct:
+        signal_interpretation = (
+            "Views show the largest percentage increase. "
+            "Investigate what is driving interest and whether it leads to more cart activity and purchases."
+        )
+
+    else:
+        signal_interpretation = (
+            "Demand signals are changing at different rates. "
+            "Compare the individual metrics to determine where further investigation is needed."
+        )
+    
+    # Return the complete investigation
     insight = {
         "product_id": event["product_id"],
         "date": event["date"],
@@ -238,18 +346,32 @@ def generate_insight(event, simulated_inventory, normal_days_of_stock=14):
         "purchase_change_pct": round(purchase_change_pct, 1),
 
         "normal_stock_days": normal_days_of_stock,
-        "current_stock_days": round(days_of_stock, 2),
+        "current_stock_days": (
+            round(days_of_stock, 2)
+            if days_of_stock != float("inf")
+            else None
+        ),
         "stockout_risk": stockout_risk,
 
-        "recommendation": recommendation
+        "demand_pattern": demand_pattern,
+        "explanation": explanation,
+        "evidence_summary": evidence_summary,
+        "signal_strength": signal_strength,
+        "strongest_signal": strongest_signal_name,
+        "strongest_signal_change_pct": strongest_signal_change_pct,
+        "signal_interpretation": signal_interpretation,
+        "recommendation": recommendation,
     }
 
     return insight
 
-insight = generate_insight(
-    event,
-    simulated_inventory
-)
+
+insight = generate_insight(event, simulated_inventory)
+
+print("\n--- InsightX Investigation ---")
+for key, value in insight.items():
+    print(f"{key}: {value}")
+
 
 all_insights = []
 
@@ -271,12 +393,96 @@ for _, row in insight_events.iterrows():
 
 insights_df = pd.DataFrame(all_insights)
 
+# Rank demand events by urgency
+insights_df["growth_score"] = (
+    insights_df["purchase_change_pct"].clip(0, 200) / 200
+)
+
+insights_df["volume_score"] = (
+    insights_df["purchase_events"]
+    / insights_df["purchase_events"].max()
+)
+
+insights_df["stock_urgency_score"] = (
+    (7 - insights_df["current_stock_days"]).clip(0, 7) / 7
+)
+
+insights_df["priority_score"] = (
+    40 * insights_df["growth_score"]
+    + 30 * insights_df["volume_score"]
+    + 30 * insights_df["stock_urgency_score"]
+).round(1)
+
+print("\nPriority score validation:")
+print("Minimum:", insights_df["priority_score"].min())
+print("Maximum:", insights_df["priority_score"].max())
+print("Missing scores:", insights_df["priority_score"].isna().sum())
+
+print("\nTop 10 highest-priority events:")
+print(
+    insights_df.nlargest(10, "priority_score")[
+        [
+            "product_id",
+            "date",
+            "purchase_events",
+            "purchase_change_pct",
+            "current_stock_days",
+            "priority_score",
+        ]
+    ].to_string(index=False)
+)
+
 insights_df.to_csv(
     "data/insights.csv",
     index=False
 )
 
 print(insights_df.iloc[0])
+
+print("\nStockout risk breakdown:")
+print(insights_df["stockout_risk"].value_counts())
+
+print("\nTop 5 events by purchase increase:")
+print(
+    insights_df.nlargest(5, "purchase_change_pct")[
+        [
+            "product_id",
+            "date",
+            "purchase_events",
+            "purchase_baseline",
+            "purchase_change_pct",
+            "current_stock_days",
+            "stockout_risk",
+        ]
+    ]
+)
+
+print("\nAvailable insight columns:")
+print(insights_df.columns.tolist())
+print("\nTop 5 priority events:")
+print(
+    insights_df.nlargest(5, "priority_score")[
+        [
+            "product_id",
+            "purchase_events",
+            "purchase_change_pct",
+            "current_stock_days",
+            "priority_score",
+        ]
+    ].to_string(index=False)
+)
+print("\nPriority label distribution:")
+print(
+    insights_df["priority_score"]
+    .apply(lambda score:
+        "Critical" if score >= 75 else
+        "High" if score >= 50 else
+        "Moderate" if score >= 25 else
+        "Low"
+    )
+    .value_counts()
+)
+
 
 # event_for_ai = insights_df.iloc[0]
 
