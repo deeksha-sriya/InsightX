@@ -44,6 +44,8 @@ function App() {
   const [summaryError, setSummaryError] = useState('')
   const [timeGrouping, setTimeGrouping] = useState('weekly')
   const [chartMetric, setChartMetric] = useState('events')
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
   const [investigationRequested, setInvestigationRequested] =
   useState(false)
   async function askGemini() {
@@ -150,6 +152,30 @@ function App() {
     ).length,
   }
 
+  const sortedInsights = [...filteredInsights].sort(
+    (a, b) => Number(b.priority_score) - Number(a.priority_score)
+  );
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(sortedInsights.length / ITEMS_PER_PAGE)
+  );
+
+  const paginatedInsights = sortedInsights.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
+  const startEvent =
+    sortedInsights.length === 0
+      ? 0
+      : (currentPage - 1) * ITEMS_PER_PAGE + 1;
+
+  const endEvent = Math.min(
+    currentPage * ITEMS_PER_PAGE,
+    sortedInsights.length
+  );
+
   const chartColors = ['#F27FA7', '#A78BFA', '#55E6B0', '#87788E']
 
   const priorityChartData = [
@@ -159,11 +185,11 @@ function App() {
     { name: 'Low', value: priorityCounts.low, color: '#6e6a85' },
   ]
 
-  
+
   const dailyChartData = Object.values(
     filteredInsights.reduce((groups, item) => {
       const date = String(item.date)
-    
+
       if (!groups[date]) {
         groups[date] = {
           date,
@@ -173,15 +199,15 @@ function App() {
           products: new Set(),
         }
       }
-    
+
       groups[date].events += 1
       groups[date].purchases += Number(item.purchase_events) || 0
       groups[date].products.add(String(item.product_id))
-    
+
       if (Number(item.priority_score) >= 75) {
         groups[date].critical += 1
       }
-    
+
       return groups
     }, {})
   )
@@ -190,8 +216,8 @@ function App() {
       products: item.products.size,
     }))
     .sort((a, b) => new Date(a.date) - new Date(b.date))
-  
-  
+
+
   const groupedChartData = (() => {
     const groups = {}
 
@@ -254,12 +280,12 @@ const chartStdDev = groupedChartData.length
 
 const chartThreshold = chartMean + chartStdDev
 
-  
+
   const averageDailyEvents = dailyChartData.length
     ? dailyChartData.reduce((sum, day) => sum + day.events, 0) /
       dailyChartData.length
     : 0
-  
+
   const dailyEventStdDev = dailyChartData.length
     ? Math.sqrt(
         dailyChartData.reduce(
@@ -268,9 +294,9 @@ const chartThreshold = chartMean + chartStdDev
         ) / dailyChartData.length
       )
     : 0
-    
+
   const spikeThreshold = averageDailyEvents + dailyEventStdDev
-    
+
   const timelineData = dailyChartData.map((day) => ({
     ...day,
     isSpike: day.events > spikeThreshold,
@@ -292,20 +318,20 @@ const chartThreshold = chartMean + chartStdDev
       date: item.date,
       priority: Number(item.priority_score) || 0,
     }))
-  
+
   function handleTimelineClick(chartItem) {
     const clicked = chartItem
-  
+
     console.log('Timeline bar clicked:', clicked)
-  
+
     if (!clicked?.date) {
       console.warn('Could not identify the clicked bar data.')
       return
     }
-  
+
     const startDate = String(clicked.date)
     let endDate = startDate
-  
+
     if (timeGrouping === 'weekly') {
       const end = new Date(`${startDate}T00:00:00`)
       end.setDate(end.getDate() + 6)
@@ -314,7 +340,7 @@ const chartThreshold = chartMean + chartStdDev
       const [year, month] = startDate.split('-').map(Number)
       endDate = new Date(year, month, 0).toISOString().slice(0, 10)
     }
-  
+
     const matchingInsights = filteredInsights
       .filter((item) => {
         const date = String(item.date).slice(0, 10)
@@ -325,9 +351,9 @@ const chartThreshold = chartMean + chartStdDev
           (Number(b.priority_score) || 0) -
           (Number(a.priority_score) || 0)
       )
-    
+
     console.log('Matching insights:', matchingInsights.length)
-    
+
     if (matchingInsights.length > 0) {
       setSelectedInsight(matchingInsights[0])
       setChatHistory([])
@@ -340,7 +366,7 @@ const chartThreshold = chartMean + chartStdDev
       console.warn('No insights found for the selected date range.')
     }
   }
-  
+
   useEffect(() => {
     fetch('/insights.csv')
       .then((response) => {
@@ -388,7 +414,6 @@ const chartThreshold = chartMean + chartStdDev
         <nav>
           <a className="nav-item active" href="#overview">▦ <span>Overview</span></a>
           <a className="nav-item" href="#insights">⌁ <span>Demand Insights</span></a>
-          <a className="nav-item" href="#inventory">◷ <span>Inventory Risk</span></a>
         </nav>
 
         <div className="sidebar-bottom">
@@ -523,9 +548,9 @@ const chartThreshold = chartMean + chartStdDev
           </article>
         </section>
         <section className="charts-grid">
-          
+
           <article className="chart-card chart-main">
-            
+
           <div className="chart-heading">
             <div>
               <p className="eyebrow">HISTORICAL ACTIVITY</p>
@@ -554,7 +579,7 @@ const chartThreshold = chartMean + chartStdDev
                 <option value="critical">Critical events</option>
               </select>
             </div>
-          </div>    
+          </div>
             <div className="chart-canvas">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
@@ -579,7 +604,7 @@ const chartThreshold = chartMean + chartStdDev
                     width={42}
                     tick={{ fill: '#B6A6B9', fontSize: 10 }}
                   />
-              
+
                   <Tooltip
                     contentStyle={{
                       backgroundColor: '#1C1220',
@@ -619,7 +644,7 @@ const chartThreshold = chartMean + chartStdDev
                     }}
                     style={{ cursor: 'pointer' }}
                   >
-                    {groupedChartData.map((item) => (                   
+                    {groupedChartData.map((item) => (
                     <Cell
                       key={item.date}
                       fill={
@@ -632,14 +657,14 @@ const chartThreshold = chartMean + chartStdDev
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            </div>  
+            </div>
             <div className="chart-legend">
               <span className="legend-dot lavender" />
               Regular activity
               <span className="legend-dot rose" />
               Unusually busy day
             </div>
-                  
+
             <p className="chart-footnote">
               Each bar represents detected insight events, not total store sales.
               Highlighted days exceed the average daily event count by more than
@@ -647,8 +672,6 @@ const chartThreshold = chartMean + chartStdDev
               replacement for the underlying product-level anomaly detector.
             </p>
           </article>
-
-
           <article className="chart-card">
             <div className="chart-heading">
               <div>
@@ -657,8 +680,8 @@ const chartThreshold = chartMean + chartStdDev
                 <p>Events grouped by priority score</p>
               </div>
             </div>
-            
-            {/* <div className="chart-canvas donut-canvas">
+
+            <div className="chart-canvas donut-canvas">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -681,25 +704,20 @@ const chartThreshold = chartMean + chartStdDev
                       borderRadius: 10,
                       color: '#F8F1F7',
                     }}
+                    formatter={(value, name) => [
+                      `${Number(value).toLocaleString()} events`,
+                      name,
+                    ]}
                   />
                 </PieChart>
               </ResponsiveContainer>
+
               <div className="donut-center">
                 <strong>{filteredInsights.length.toLocaleString()}</strong>
                 <span>Events</span>
               </div>
-            </div> */}
-            <div className="priority-bar" role="img" aria-label="Priority distribution">
-              {priorityChartData
-                .filter((i) => i.value > 0)
-                .map((i) => (
-                  <span
-                    key={i.name}
-                    className={`priority-seg ${i.name.toLowerCase()}`}
-                    style={{ flexGrow: i.value }}
-                  />
-                ))}
             </div>
+
             <div className="chart-legend-list">
               {priorityChartData.map((item) => (
                 <div className="chart-legend-row" key={item.name}>
@@ -767,9 +785,18 @@ const chartThreshold = chartMean + chartStdDev
                     radius={[0, 6, 6, 0]}
                     maxBarSize={24}
                   >
-                    {topSpikeData.map((d, i) => (
-                      <Cell key={i} fill={d.priority >= 75 ? '#ff5c7a' : d.priority >= 50 ? '#f2b07a' : '#9a8cf2'} />
-                    ))}
+                  {topSpikeData.map((d, i) => (
+                    <Cell
+                      key={i}
+                      fill={
+                        d.priority >= 75
+                          ? '#ff5c7a'
+                          : d.priority >= 50
+                            ? '#f2b07a'
+                            : '#9a8cf2'
+                      }
+                    />
+                  ))}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -814,7 +841,10 @@ const chartThreshold = chartMean + chartStdDev
               <select
                 id="date-filter"
                 value={selectedDate}
-                onChange={(event) => setSelectedDate(event.target.value)}
+                onChange={(event) => {
+                  setSelectedDate(event.target.value);
+                  setCurrentPage(1);
+                }}
               >
                 <option value="all">All dates</option>
                 {[...new Set(csvInsights.map((item) => item.date))]
@@ -829,11 +859,12 @@ const chartThreshold = chartMean + chartStdDev
           </div>
           <button
             className="secondary-button"
-            onClick={() =>
+            onClick={() => {
+              setCurrentPage(1);
               document
                 .getElementById('insight-table')
-                ?.scrollIntoView({ behavior: 'smooth' })
-            }
+                ?.scrollIntoView({ behavior: 'smooth' });
+            }}
           >
             View all insights ↗
           </button>
@@ -845,7 +876,9 @@ const chartThreshold = chartMean + chartStdDev
               <h3>Recent demand spikes</h3>
               <p>Sample events detected in historical data</p>
             </div>
-            <span className="table-count">Showing {Math.min(filteredInsights.length, 10)} of {filteredInsights.length} events</span>
+            <span className="table-count">
+              Showing {startEvent}–{endEvent} of {sortedInsights.length} events
+            </span>
           </div>
 
           <div className="table-wrap">
@@ -866,10 +899,7 @@ const chartThreshold = chartMean + chartStdDev
                 </tr>
               </thead>
               <tbody>
-                {[...filteredInsights]
-                  .sort((a, b) => Number(b.priority_score) - Number(a.priority_score))
-                  .slice(0, 10)
-                  .map((item) => (
+                {paginatedInsights.map((item) => (
                     <tr
                       key={`${item.product_id}-${item.date}`}
                       onClick={() => {
@@ -927,6 +957,27 @@ const chartThreshold = chartMean + chartStdDev
                   ))}
               </tbody>
             </table>
+          </div>
+          <div className="pagination">
+            <button
+              className="secondary-button"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((page) => page - 1)}
+            >
+              ← Previous
+            </button>
+
+            <span className="pagination-info">
+              Page {currentPage} of {totalPages}
+            </span>
+
+            <button
+              className="secondary-button"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((page) => page + 1)}
+            >
+              Next →
+            </button>
           </div>
           <div className="table-note">Percentage changes compare observed events with a preceding rolling baseline. Risk labels are illustrative for this demo.</div>
         </section>
